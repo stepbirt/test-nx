@@ -1,0 +1,60 @@
+# packages/app1/Dockerfile
+
+# 1️⃣ Builder stage: compile everything
+FROM node:22.17 AS builder
+WORKDIR /app
+
+# Copy only what we need to install & build
+COPY ./package*.json         ./ 
+COPY ./nx.json               ./nx.json
+COPY ./tsconfig.base.json    ./tsconfig.base.json
+
+# Install full deps (needed for build; includes @swc/core, nx, ts-lib, prisma, etc)
+RUN npm install
+
+# Copy just the code that affects app1 and its libs
+COPY ./packages    ./packages
+
+# COPY . . 
+# Build only app1 (Nx will also compile its lib deps into dist/libs)
+RUN npx nx run app1:build --prod --verbose
+
+# 2️⃣ Deps stage: shrink node_modules to prod-only
+FROM node:lts-alpine AS deps
+WORKDIR /app
+
+RUN npm install -g npm@11.5.2
+
+COPY --from=builder /app/package.json   ./package.json
+COPY --from=builder /app/package-lock.json   ./package-lock.json
+
+COPY --from=builder /app/packages/lib1 ./packages/lib1
+
+# Install only production deps!
+RUN npm ci --omit=dev
+
+FROM node:lts-alpine AS production
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+
+# Create & switch to non-root user
+RUN addgroup --system app1 && \
+  adduser --system -G app1 app1
+
+USER app1
+
+# Copy in just the prod deps
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=builder /app/node_modules/@swc/helpers ./node_modules/@swc/helpers
+# COPY --from=builder /app/node_modules ./node_modules
+
+# Copy compiled JS
+COPY --from=builder /app/dist/app1   ./dist/app1
+COPY --from=builder /app/packages/lib1/dist   ./node_modules/@mylib/lib1
+
+EXPOSE 3000
+
+# Launch your NestJS app
+CMD ["node", "./dist/app1/main.js"]
