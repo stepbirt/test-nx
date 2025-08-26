@@ -45,6 +45,12 @@
         "options": {
           "passWithNoTests": true
         }
+      },
+      "docker-build": {
+        "dependsOn": [
+          "build"
+        ],
+        "command": "docker build -f packages/app1/Dockerfile . -t app1"
       }
     }
   }
